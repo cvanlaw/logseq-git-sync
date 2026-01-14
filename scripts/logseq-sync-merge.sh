@@ -93,7 +93,8 @@ do_fetch_merge() {
     save_conflict_info "$graph"
 
     # Stash local commits and reset to remote
-    local stash_msg="logseq-sync conflict $(date '+%Y-%m-%d %H:%M:%S')"
+    local stash_msg
+    stash_msg="logseq-sync conflict $(date '+%Y-%m-%d %H:%M:%S')"
     git stash push -m "$stash_msg" --include-untracked 2>/dev/null || true
     git reset --hard "$remote/$branch"
 
