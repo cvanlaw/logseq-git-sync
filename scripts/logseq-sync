@@ -260,13 +260,17 @@ status() {
         echo "  Path: $REPO_PATH"
 
         # Check services
+        # Note: Capture launchctl output first to avoid SIGPIPE with pipefail
+        local launchctl_output
+        launchctl_output=$(launchctl list 2>/dev/null || true)
+
         local watcher_status="stopped"
         local fetch_status="stopped"
 
-        if launchctl list | grep -q "com.logseq-sync.watcher.${graph}"; then
+        if echo "$launchctl_output" | grep -q "com.logseq-sync.watcher.${graph}"; then
             watcher_status="running"
         fi
-        if launchctl list | grep -q "com.logseq-sync.fetch.${graph}"; then
+        if echo "$launchctl_output" | grep -q "com.logseq-sync.fetch.${graph}"; then
             fetch_status="running"
         fi
 
