@@ -1,0 +1,402 @@
+#!/usr/bin/env bash
+# scripts/logseq-sync
+# Main CLI entry point for logseq-git-sync
+
+set -euo pipefail
+
+VERSION="1.0.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_DIR="${HOME}/.config/logseq-git-sync"
+LAUNCH_AGENTS="${HOME}/Library/LaunchAgents"
+
+# Source helpers
+# shellcheck source=logseq-sync-notify.sh
+source "${SCRIPT_DIR}/logseq-sync-notify.sh" 2>/dev/null || true
+
+usage() {
+    cat << EOF
+logseq-git-sync v$VERSION
+
+Usage: logseq-sync <command> [options]
+
+Commands:
+  add-graph <path>   Add a new Logseq graph
+  remove-graph <n>   Remove a graph
+  status             Show status of all graphs
+  sync [graph]       Manually sync a graph (or all)
+  logs [graph]       Tail logs
+  conflicts          List unresolved conflicts
+  start [graph]      Start services for a graph (or all)
+  stop [graph]       Stop services for a graph (or all)
+  stop-all           Stop all services
+  install-services   Regenerate and load launchd plists
+
+EOF
+}
+
+list_graphs() {
+    find "$CONFIG_DIR/graphs" -name "*.conf" -exec basename {} .conf \; 2>/dev/null | sort
+}
+
+add_graph() {
+    local path="${1:-}"
+
+    if [[ -z "$path" ]]; then
+        echo "Usage: logseq-sync add-graph <path>"
+        echo ""
+        echo "Path should be the root of your Logseq graph (contains journals/ and pages/)"
+        exit 1
+    fi
+
+    # Expand path
+    path=$(cd "$path" 2>/dev/null && pwd) || {
+        echo "Error: Path does not exist: $path"
+        exit 1
+    }
+
+    # Verify it's a git repo with Logseq structure
+    if [[ ! -d "$path/.git" ]]; then
+        echo "Error: Not a git repository: $path"
+        exit 1
+    fi
+
+    if [[ ! -d "$path/journals" ]] && [[ ! -d "$path/pages" ]]; then
+        echo "Warning: No journals/ or pages/ directory found. Is this a Logseq graph?"
+        read -p "Continue anyway? [y/N] " -n 1 -r
+        echo
+        [[ ! $REPLY =~ ^[Yy]$ ]] && exit 1
+    fi
+
+    # Get graph name
+    local default_name
+    default_name=$(basename "$path")
+    read -r -p "Graph name [$default_name]: " graph_name
+    graph_name="${graph_name:-$default_name}"
+
+    # Sanitize name
+    graph_name=$(echo "$graph_name" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-')
+
+    # Check if exists
+    local config_file="$CONFIG_DIR/graphs/${graph_name}.conf"
+    if [[ -f "$config_file" ]]; then
+        echo "Error: Graph '$graph_name' already exists"
+        exit 1
+    fi
+
+    # Create config
+    mkdir -p "$CONFIG_DIR/graphs"
+    cat > "$config_file" << EOF
+# Configuration for graph: $graph_name
+
+REPO_PATH="$path"
+REMOTE="origin"
+BRANCH="main"
+
+# Override global settings (optional)
+# QUIET_PERIOD=30
+# FETCH_INTERVAL=300
+EOF
+
+    echo "Created config: $config_file"
+
+    # Generate launchd plists
+    generate_plists "$graph_name"
+
+    # Start services
+    start_graph "$graph_name"
+
+    echo ""
+    echo "Graph '$graph_name' added and started!"
+    echo "Run 'logseq-sync status' to verify."
+}
+
+generate_plists() {
+    local graph="$1"
+    local config_file="$CONFIG_DIR/graphs/${graph}.conf"
+
+    # shellcheck source=/dev/null
+    source "$config_file"
+
+    mkdir -p "$LAUNCH_AGENTS"
+    mkdir -p "$CONFIG_DIR/logs"
+
+    # Watcher plist
+    cat > "$LAUNCH_AGENTS/com.logseq-sync.watcher.${graph}.plist" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.logseq-sync.watcher.${graph}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/logseq-sync-watcher.sh</string>
+        <string>${graph}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardErrorPath</key>
+    <string>${CONFIG_DIR}/logs/watcher-${graph}.err</string>
+    <key>StandardOutPath</key>
+    <string>${CONFIG_DIR}/logs/watcher-${graph}.out</string>
+</dict>
+</plist>
+EOF
+
+    # Commit trigger plist (watches trigger file)
+    cat > "$LAUNCH_AGENTS/com.logseq-sync.commit.${graph}.plist" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.logseq-sync.commit.${graph}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/logseq-sync-commit.sh</string>
+        <string>${graph}</string>
+        <string>commit</string>
+    </array>
+    <key>WatchPaths</key>
+    <array>
+        <string>/tmp/logseq-sync-trigger-${graph}</string>
+    </array>
+    <key>StandardErrorPath</key>
+    <string>${CONFIG_DIR}/logs/commit-${graph}.err</string>
+    <key>StandardOutPath</key>
+    <string>${CONFIG_DIR}/logs/commit-${graph}.out</string>
+</dict>
+</plist>
+EOF
+
+    # Scheduled fetch plist
+    # shellcheck source=/dev/null
+    source "$CONFIG_DIR/config" 2>/dev/null || true
+    local fetch_interval="${FETCH_INTERVAL:-300}"
+
+    cat > "$LAUNCH_AGENTS/com.logseq-sync.fetch.${graph}.plist" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.logseq-sync.fetch.${graph}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/logseq-sync-merge.sh</string>
+        <string>${graph}</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>${fetch_interval}</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardErrorPath</key>
+    <string>${CONFIG_DIR}/logs/fetch-${graph}.err</string>
+    <key>StandardOutPath</key>
+    <string>${CONFIG_DIR}/logs/fetch-${graph}.out</string>
+</dict>
+</plist>
+EOF
+
+    echo "Generated launchd plists for $graph"
+}
+
+start_graph() {
+    local graph="$1"
+
+    for plist in "$LAUNCH_AGENTS"/com.logseq-sync.*."${graph}".plist; do
+        [[ -f "$plist" ]] || continue
+        launchctl load "$plist" 2>/dev/null || true
+    done
+
+    echo "Started services for $graph"
+}
+
+stop_graph() {
+    local graph="$1"
+
+    for plist in "$LAUNCH_AGENTS"/com.logseq-sync.*."${graph}".plist; do
+        [[ -f "$plist" ]] || continue
+        launchctl unload "$plist" 2>/dev/null || true
+    done
+
+    echo "Stopped services for $graph"
+}
+
+stop_all() {
+    for graph in $(list_graphs); do
+        stop_graph "$graph"
+    done
+}
+
+status() {
+    echo "logseq-git-sync status"
+    echo "======================"
+    echo ""
+
+    local graphs
+    graphs=$(list_graphs)
+
+    if [[ -z "$graphs" ]]; then
+        echo "No graphs configured."
+        echo "Run 'logseq-sync add-graph <path>' to add one."
+        exit 0
+    fi
+
+    for graph in $graphs; do
+        local config_file="$CONFIG_DIR/graphs/${graph}.conf"
+        # shellcheck source=/dev/null
+        source "$config_file"
+
+        echo "Graph: $graph"
+        echo "  Path: $REPO_PATH"
+
+        # Check services
+        local watcher_status="stopped"
+        local fetch_status="stopped"
+
+        if launchctl list | grep -q "com.logseq-sync.watcher.${graph}"; then
+            watcher_status="running"
+        fi
+        if launchctl list | grep -q "com.logseq-sync.fetch.${graph}"; then
+            fetch_status="running"
+        fi
+
+        echo "  Watcher: $watcher_status"
+        echo "  Fetch: $fetch_status"
+
+        # Git status
+        if [[ -d "$REPO_PATH" ]]; then
+            cd "$REPO_PATH"
+            local branch
+            branch=$(git branch --show-current 2>/dev/null || echo "unknown")
+            local status="clean"
+            if ! git diff --quiet 2>/dev/null || [[ -n "$(git ls-files --others --exclude-standard 2>/dev/null)" ]]; then
+                status="has changes"
+            fi
+            echo "  Branch: $branch ($status)"
+        fi
+
+        echo ""
+    done
+}
+
+sync_graph() {
+    local graph="$1"
+    local config_file="$CONFIG_DIR/graphs/${graph}.conf"
+
+    if [[ ! -f "$config_file" ]]; then
+        echo "Error: Graph not found: $graph"
+        exit 1
+    fi
+
+    # shellcheck source=/dev/null
+    source "$config_file"
+
+    echo "Syncing $graph..."
+
+    # Fetch and merge first
+    "${SCRIPT_DIR}/logseq-sync-merge.sh" "$graph" || true
+
+    # Then commit and push
+    "${SCRIPT_DIR}/logseq-sync-commit.sh" "$graph" commit
+    "${SCRIPT_DIR}/logseq-sync-commit.sh" "$graph" push || true
+
+    echo "Done."
+}
+
+show_logs() {
+    local graph="${1:-}"
+
+    if [[ -n "$graph" ]]; then
+        tail -f "$CONFIG_DIR/logs/"*"${graph}"* 2>/dev/null || {
+            echo "No logs found for $graph"
+        }
+    else
+        tail -f "$CONFIG_DIR/logs/"*.log 2>/dev/null || {
+            echo "No logs found"
+        }
+    fi
+}
+
+show_conflicts() {
+    local conflict_dir="$CONFIG_DIR/conflicts"
+
+    if [[ ! -d "$conflict_dir" ]] || [[ -z "$(ls -A "$conflict_dir" 2>/dev/null)" ]]; then
+        echo "No conflicts recorded."
+        exit 0
+    fi
+
+    echo "Unresolved conflicts:"
+    echo ""
+
+    for conflict_file in "$conflict_dir"/*.log; do
+        [[ -f "$conflict_file" ]] || continue
+        echo "--- $(basename "$conflict_file") ---"
+        cat "$conflict_file"
+        echo ""
+    done
+}
+
+# Main command dispatch
+case "${1:-}" in
+    add-graph)
+        add_graph "${2:-}"
+        ;;
+    remove-graph)
+        echo "Not implemented yet"
+        ;;
+    status)
+        status
+        ;;
+    sync)
+        if [[ -n "${2:-}" ]]; then
+            sync_graph "$2"
+        else
+            for graph in $(list_graphs); do
+                sync_graph "$graph"
+            done
+        fi
+        ;;
+    logs)
+        show_logs "${2:-}"
+        ;;
+    conflicts)
+        show_conflicts
+        ;;
+    start)
+        if [[ -n "${2:-}" ]]; then
+            start_graph "$2"
+        else
+            for graph in $(list_graphs); do
+                start_graph "$graph"
+            done
+        fi
+        ;;
+    stop)
+        if [[ -n "${2:-}" ]]; then
+            stop_graph "$2"
+        else
+            stop_all
+        fi
+        ;;
+    stop-all)
+        stop_all
+        ;;
+    install-services)
+        for graph in $(list_graphs); do
+            generate_plists "$graph"
+            start_graph "$graph"
+        done
+        ;;
+    -h|--help|help|"")
+        usage
+        ;;
+    *)
+        echo "Unknown command: $1"
+        usage
+        exit 1
+        ;;
+esac
