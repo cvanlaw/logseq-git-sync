@@ -1,4 +1,4 @@
-.PHONY: help install uninstall check-deps add-graph status logs lint test clean
+.PHONY: help install uninstall check-deps check-test-deps add-graph status logs lint test clean
 
 PREFIX ?= /usr/local
 CONFIG_DIR := $(HOME)/.config/logseq-git-sync
@@ -42,6 +42,9 @@ check-deps:
 	@command -v fswatch >/dev/null || (echo "Error: fswatch not found. Run: brew install fswatch" && exit 1)
 	@command -v git >/dev/null || (echo "Error: git not found" && exit 1)
 
+check-test-deps:
+	@command -v bats >/dev/null || (echo "Warning: bats not found. Run: brew install bats-core" && exit 0)
+
 add-graph:
 	@logseq-sync add-graph
 
@@ -54,8 +57,8 @@ logs:
 lint:
 	@shellcheck scripts/logseq-sync scripts/logseq-sync-*.sh
 
-test:
-	@bats tests/
+test: check-test-deps
+	@if command -v bats >/dev/null; then bats tests/; else echo "Skipping tests (bats not installed)"; fi
 
 clean:
 	@rm -rf test-tmp/
