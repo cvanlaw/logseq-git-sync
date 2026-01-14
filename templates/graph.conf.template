@@ -1,0 +1,9 @@
+# Configuration for graph: GRAPH_NAME
+
+REPO_PATH="REPO_PATH_PLACEHOLDER"
+REMOTE="origin"
+BRANCH="main"
+
+# Override global settings (optional)
+# QUIET_PERIOD=30
+# FETCH_INTERVAL=300

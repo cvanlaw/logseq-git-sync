@@ -1,0 +1,22 @@
+# logseq-git-sync global configuration
+
+# Timing
+QUIET_PERIOD=30              # Seconds of no edits before commit
+FETCH_INTERVAL=300           # Seconds between fetch checks (5 min)
+PUSH_RETRY_DELAY=60          # Retry failed push after this delay
+MAX_PUSH_RETRIES=3           # Give up after this many failures
+
+# Notifications
+NOTIFY_ON_PUSH=true          # Notify on successful push
+NOTIFY_ON_MERGE=true         # Notify on successful merge
+NOTIFY_ON_ERROR=true         # Notify on any error
+NOTIFY_ON_CONFLICT=true      # Notify when manual resolution needed
+
+# Logging
+LOG_DIR="${HOME}/.config/logseq-git-sync/logs"
+LOG_LEVEL="info"             # debug, info, warn, error
+LOG_RETAIN_DAYS=30           # Delete logs older than this
+
+# Optional features
+DETECT_LOGSEQ_APP=false      # Watch for Logseq launch/quit
+NETWORK_WATCH=false          # Trigger sync on network change
