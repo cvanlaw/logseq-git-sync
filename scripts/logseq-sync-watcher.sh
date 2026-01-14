@@ -5,6 +5,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=logseq-sync-notify.sh
 source "${SCRIPT_DIR}/logseq-sync-notify.sh"
 
 GRAPH="${1:-}"
@@ -18,6 +19,7 @@ fi
 # Load graph config
 GRAPH_CONFIG="${HOME}/.config/logseq-git-sync/graphs/${GRAPH}.conf"
 if [[ -f "$GRAPH_CONFIG" ]]; then
+    # shellcheck source=/dev/null
     source "$GRAPH_CONFIG"
 else
     echo "Error: Graph config not found: $GRAPH_CONFIG"
@@ -30,26 +32,25 @@ if [[ -z "${REPO_PATH:-}" ]]; then
 fi
 
 TRIGGER_FILE="/tmp/logseq-sync-trigger-${GRAPH}"
-LAST_CHANGE=0
+# Use a file to track last change time (avoids subshell variable scoping issues)
+TIMESTAMP_FILE="/tmp/logseq-sync-lastchange-${GRAPH}"
 
 log_msg "INFO" "$GRAPH" "Starting watcher for $REPO_PATH (quiet period: ${QUIET_PERIOD}s)"
 
-# Function to handle file changes
-handle_change() {
-    LAST_CHANGE=$(date +%s)
-    log_msg "DEBUG" "$GRAPH" "Change detected, resetting quiet period timer"
-}
+# Initialize timestamp file
+echo "0" > "$TIMESTAMP_FILE"
 
 # Function to check if quiet period elapsed
 check_quiet_period() {
-    local now
+    local last_change now elapsed
+    last_change=$(cat "$TIMESTAMP_FILE" 2>/dev/null || echo "0")
     now=$(date +%s)
-    local elapsed=$((now - LAST_CHANGE))
+    elapsed=$((now - last_change))
 
-    if [[ $LAST_CHANGE -gt 0 ]] && [[ $elapsed -ge $QUIET_PERIOD ]]; then
+    if [[ $last_change -gt 0 ]] && [[ $elapsed -ge $QUIET_PERIOD ]]; then
         log_msg "DEBUG" "$GRAPH" "Quiet period elapsed, triggering sync"
         touch "$TRIGGER_FILE"
-        LAST_CHANGE=0
+        echo "0" > "$TIMESTAMP_FILE"
     fi
 }
 
@@ -64,9 +65,11 @@ EXCLUDES=(
     --exclude 'logseq'
 )
 
-# Start fswatch in background, piping to handler
+# Start fswatch in background
+# Write timestamp to file on each change (file-based IPC avoids subshell issues)
 fswatch -r "${EXCLUDES[@]}" "${WATCH_DIRS[@]}" 2>/dev/null | while read -r _; do
-    handle_change
+    date +%s > "$TIMESTAMP_FILE"
+    log_msg "DEBUG" "$GRAPH" "Change detected, resetting quiet period timer"
 done &
 
 FSWATCH_PID=$!
@@ -75,6 +78,7 @@ FSWATCH_PID=$!
 cleanup() {
     log_msg "INFO" "$GRAPH" "Stopping watcher"
     kill "$FSWATCH_PID" 2>/dev/null || true
+    rm -f "$TIMESTAMP_FILE"
     exit 0
 }
 trap cleanup SIGTERM SIGINT
