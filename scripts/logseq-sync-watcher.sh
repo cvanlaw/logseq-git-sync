@@ -65,11 +65,23 @@ EXCLUDES=(
     --exclude 'logseq'
 )
 
+# Verify watch directories exist
+for dir in "${WATCH_DIRS[@]}"; do
+    if [[ ! -d "$dir" ]]; then
+        log_msg "WARN" "$GRAPH" "Watch directory does not exist: $dir"
+    fi
+done
+
 # Start fswatch in background
 # Write timestamp to file on each change (file-based IPC avoids subshell issues)
-fswatch -r "${EXCLUDES[@]}" "${WATCH_DIRS[@]}" 2>/dev/null | while read -r _; do
-    date +%s > "$TIMESTAMP_FILE"
-    log_msg "DEBUG" "$GRAPH" "Change detected, resetting quiet period timer"
+fswatch -r "${EXCLUDES[@]}" "${WATCH_DIRS[@]}" 2>&1 | while read -r line; do
+    # Log fswatch errors (they start with "fswatch" or contain "error")
+    if [[ "$line" == fswatch* ]] || [[ "$line" == *error* ]] || [[ "$line" == *Error* ]]; then
+        log_msg "ERROR" "$GRAPH" "fswatch: $line"
+    else
+        date +%s > "$TIMESTAMP_FILE"
+        log_msg "DEBUG" "$GRAPH" "Change detected: $line"
+    fi
 done &
 
 FSWATCH_PID=$!
@@ -85,6 +97,11 @@ trap cleanup SIGTERM SIGINT
 
 # Main loop - check quiet period every second
 while true; do
+    # Verify fswatch pipeline is still running
+    if ! kill -0 "$FSWATCH_PID" 2>/dev/null; then
+        log_msg "ERROR" "$GRAPH" "fswatch process died, exiting for restart"
+        exit 1
+    fi
     check_quiet_period
     sleep 1
 done
