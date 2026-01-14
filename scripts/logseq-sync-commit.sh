@@ -63,7 +63,11 @@ do_push() {
     cd "$repo_path"
 
     # Check if we have commits to push
-    if git diff --quiet "$remote/$branch" HEAD 2>/dev/null; then
+    local local_head remote_head
+    local_head=$(git rev-parse HEAD)
+    remote_head=$(git rev-parse "$remote/$branch" 2>/dev/null || echo "none")
+
+    if [[ "$local_head" == "$remote_head" ]]; then
         log_msg "DEBUG" "$graph" "Nothing to push"
         return 0
     fi
