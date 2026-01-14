@@ -76,6 +76,12 @@ add_graph() {
     # Sanitize name
     graph_name=$(echo "$graph_name" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-')
 
+    # Validate name is not empty after sanitization
+    if [[ -z "$graph_name" ]]; then
+        echo "Error: Invalid graph name (must contain alphanumeric characters)"
+        exit 1
+    fi
+
     # Check if exists
     local config_file="$CONFIG_DIR/graphs/${graph_name}.conf"
     if [[ -f "$config_file" ]]; then
