@@ -1,8 +1,8 @@
 # Configuration for graph: GRAPH_NAME
 
 REPO_PATH="REPO_PATH_PLACEHOLDER"
-REMOTE="origin"
-BRANCH="main"
+REMOTE="origin"              # Git remote name
+BRANCH="main"                # Git branch to sync
 
 # Override global settings (optional)
 # QUIET_PERIOD=30
