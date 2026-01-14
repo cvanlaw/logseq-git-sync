@@ -1,4 +1,4 @@
-.PHONY: help install uninstall status logs lint test clean
+.PHONY: help install uninstall check-deps add-graph status logs lint test clean
 
 PREFIX ?= /usr/local
 CONFIG_DIR := $(HOME)/.config/logseq-git-sync
