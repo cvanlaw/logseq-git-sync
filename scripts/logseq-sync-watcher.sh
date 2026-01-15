@@ -4,6 +4,10 @@
 
 set -euo pipefail
 
+# Extend PATH for launchd environment (which uses minimal PATH)
+# Include common Homebrew locations for both Intel and Apple Silicon Macs
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=logseq-sync-notify.sh
 source "${SCRIPT_DIR}/logseq-sync-notify.sh"
@@ -57,12 +61,13 @@ check_quiet_period() {
 # Watch directories
 WATCH_DIRS=("$REPO_PATH/journals" "$REPO_PATH/pages")
 
-# Build exclude patterns
+# Build exclude patterns (fswatch uses POSIX extended regex)
+# Note: '/logseq/' matches the directory, not paths containing 'logseq'
 EXCLUDES=(
-    --exclude '.git'
-    --exclude '.DS_Store'
-    --exclude '*.bak'
-    --exclude 'logseq'
+    --exclude '/\.git/'
+    --exclude '\.DS_Store'
+    --exclude '\.bak$'
+    --exclude '/logseq/'
 )
 
 # Verify watch directories exist
