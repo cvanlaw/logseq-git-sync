@@ -113,7 +113,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 
     case "$ACTION" in
         commit)
-            do_commit "$GRAPH"
+            if do_commit "$GRAPH"; then
+                do_push "$GRAPH"
+            fi
             ;;
         push)
             do_push "$GRAPH"
