@@ -30,12 +30,269 @@ Commands:
   stop [graph]       Stop services for a graph (or all)
   stop-all           Stop all services
   install-services   Regenerate and load launchd plists
+  config [cmd]       View/edit configuration
+                     show [--graph NAME]  Show config
+                     edit [--graph NAME]  Edit in \$EDITOR
+                     get KEY [--graph NAME]  Get value
+                     set KEY VAL [--graph NAME]  Set value
 
 EOF
 }
 
 list_graphs() {
     find "$CONFIG_DIR/graphs" -name "*.conf" -exec basename {} .conf \; 2>/dev/null | sort
+}
+
+# ============================================
+# Config command functions
+# ============================================
+
+get_config_path() {
+    local graph="${1:-}"
+    if [[ -n "$graph" ]]; then
+        local path="$CONFIG_DIR/graphs/${graph}.conf"
+        if [[ ! -f "$path" ]]; then
+            echo "Error: Graph '$graph' not found. Run 'logseq-sync status' to list graphs." >&2
+            return 1
+        fi
+        echo "$path"
+    else
+        echo "$CONFIG_DIR/config"
+    fi
+}
+
+ensure_global_config() {
+    if [[ ! -f "$CONFIG_DIR/config" ]]; then
+        mkdir -p "$CONFIG_DIR"
+        if [[ -f "$SCRIPT_DIR/../templates/config.template" ]]; then
+            cp "$SCRIPT_DIR/../templates/config.template" "$CONFIG_DIR/config"
+        else
+            touch "$CONFIG_DIR/config"
+        fi
+    fi
+}
+
+config_show() {
+    local graph=""
+
+    # Parse --graph flag
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --graph)
+                graph="$2"
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -n "$graph" ]]; then
+        local config_path
+        config_path=$(get_config_path "$graph") || exit 1
+        echo "Graph config ($config_path):"
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ "$line" =~ ^# ]] && continue
+            [[ -z "$line" ]] && continue
+            echo "  $line"
+        done < "$config_path"
+    else
+        # Show global config
+        if [[ -f "$CONFIG_DIR/config" ]]; then
+            echo "Global config ($CONFIG_DIR/config):"
+            while IFS= read -r line || [[ -n "$line" ]]; do
+                [[ "$line" =~ ^# ]] && continue
+                [[ -z "$line" ]] && continue
+                echo "  $line"
+            done < "$CONFIG_DIR/config"
+        else
+            echo "Global config (defaults - no config file exists):"
+            if [[ -f "$SCRIPT_DIR/../templates/config.template" ]]; then
+                while IFS= read -r line || [[ -n "$line" ]]; do
+                    [[ "$line" =~ ^# ]] && continue
+                    [[ -z "$line" ]] && continue
+                    echo "  $line"
+                done < "$SCRIPT_DIR/../templates/config.template"
+            fi
+        fi
+
+        echo ""
+        echo "Graphs:"
+        local graphs
+        graphs=$(list_graphs)
+        if [[ -n "$graphs" ]]; then
+            for g in $graphs; do
+                printf "  %-12s %s\n" "$g" "$CONFIG_DIR/graphs/${g}.conf"
+            done
+        else
+            echo "  (none configured)"
+        fi
+
+        echo ""
+        echo "Use 'logseq-sync config show --graph NAME' to view a graph's config."
+        echo "Use 'logseq-sync config edit' to modify settings."
+    fi
+}
+
+config_get() {
+    local key=""
+    local graph=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --graph)
+                graph="$2"
+                shift 2
+                ;;
+            *)
+                if [[ -z "$key" ]]; then
+                    key="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$key" ]]; then
+        echo "Usage: logseq-sync config get KEY [--graph NAME]" >&2
+        exit 1
+    fi
+
+    local config_path
+    config_path=$(get_config_path "$graph") || exit 1
+
+    if [[ ! -f "$config_path" ]]; then
+        exit 1
+    fi
+
+    local value
+    value=$(grep "^${key}=" "$config_path" 2>/dev/null | head -1 | cut -d= -f2-)
+
+    if [[ -z "$value" ]]; then
+        exit 1
+    fi
+
+    # Remove surrounding quotes if present
+    value="${value#\"}"
+    value="${value%\"}"
+    value="${value#\'}"
+    value="${value%\'}"
+
+    echo "$value"
+}
+
+config_set() {
+    local key=""
+    local value=""
+    local graph=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --graph)
+                graph="$2"
+                shift 2
+                ;;
+            *)
+                if [[ -z "$key" ]]; then
+                    key="$1"
+                elif [[ -z "$value" ]]; then
+                    value="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$key" ]] || [[ -z "$value" ]]; then
+        echo "Usage: logseq-sync config set KEY VALUE [--graph NAME]" >&2
+        exit 1
+    fi
+
+    local config_path
+    if [[ -n "$graph" ]]; then
+        config_path=$(get_config_path "$graph") || exit 1
+    else
+        ensure_global_config
+        config_path="$CONFIG_DIR/config"
+    fi
+
+    # Update or add the key
+    if grep -q "^${key}=" "$config_path" 2>/dev/null; then
+        # Key exists, replace it
+        local tmp_file
+        tmp_file=$(mktemp)
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            if [[ "$line" =~ ^${key}= ]]; then
+                echo "${key}=${value}"
+            else
+                echo "$line"
+            fi
+        done < "$config_path" > "$tmp_file"
+        mv "$tmp_file" "$config_path"
+    else
+        # Key doesn't exist, append it
+        echo "${key}=${value}" >> "$config_path"
+    fi
+}
+
+config_edit() {
+    local graph=""
+
+    # Parse --graph flag
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --graph)
+                graph="$2"
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    local config_path
+    if [[ -n "$graph" ]]; then
+        config_path=$(get_config_path "$graph") || exit 1
+    else
+        ensure_global_config
+        config_path="$CONFIG_DIR/config"
+    fi
+
+    local editor="${EDITOR:-vi}"
+    "$editor" "$config_path"
+}
+
+config_cmd() {
+    local subcmd="${1:-show}"
+    shift 2>/dev/null || true
+
+    case "$subcmd" in
+        show|"")
+            config_show "$@"
+            ;;
+        get)
+            config_get "$@"
+            ;;
+        set)
+            config_set "$@"
+            ;;
+        edit)
+            config_edit "$@"
+            ;;
+        --graph)
+            # Handle: config --graph NAME (same as config show --graph NAME)
+            config_show --graph "$@"
+            ;;
+        *)
+            echo "Unknown config subcommand: $subcmd"
+            echo "Usage: logseq-sync config [show|get|set|edit] [--graph NAME]"
+            exit 1
+            ;;
+    esac
 }
 
 add_graph() {
@@ -400,6 +657,10 @@ case "${1:-}" in
             generate_plists "$graph"
             start_graph "$graph"
         done
+        ;;
+    config)
+        shift
+        config_cmd "$@"
         ;;
     -h|--help|help|"")
         usage
