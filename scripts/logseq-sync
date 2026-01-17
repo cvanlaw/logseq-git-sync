@@ -21,7 +21,7 @@ Usage: logseq-sync <command> [options]
 
 Commands:
   add-graph <path>   Add a new Logseq graph
-  remove-graph <n>   Remove a graph
+  remove-graph <name> [--force]   Remove a graph
   status             Show status of all graphs
   sync [graph]       Manually sync a graph (or all)
   logs [graph]       Tail logs
@@ -373,6 +373,50 @@ EOF
     echo "Run 'logseq-sync status' to verify."
 }
 
+remove_graph() {
+    local graph="$1"
+    local force="$2"
+
+    # Validate graph exists
+    if [[ ! -f "$CONFIG_DIR/graphs/${graph}.conf" ]]; then
+        echo "Error: Graph '$graph' not found"
+        echo "Available graphs:"
+        list_graphs | sed 's/^/  /'
+        exit 1
+    fi
+
+    # Confirmation prompt (unless --force)
+    if [[ "$force" != "--force" ]]; then
+        echo "This will remove graph '$graph' and stop its services."
+        echo "Your Logseq files will NOT be deleted."
+        printf "Continue? [y/N] "
+        read -r confirm
+        [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
+    fi
+
+    # Stop services first
+    stop_graph "$graph"
+
+    # Remove launchd plists
+    for plist in "$LAUNCH_AGENTS"/com.logseq-sync.*."${graph}".plist; do
+        [[ -f "$plist" ]] && rm -f "$plist"
+    done
+
+    # Remove config file
+    rm -f "$CONFIG_DIR/graphs/${graph}.conf"
+
+    # Clean up temp files
+    rm -f "/tmp/logseq-sync-trigger-${graph}"
+    rm -f "/tmp/logseq-sync-lastchange-${graph}"
+
+    # Remove service log files (not the main daily logs)
+    rm -f "$CONFIG_DIR/logs/watcher-${graph}".{out,err}
+    rm -f "$CONFIG_DIR/logs/commit-${graph}".{out,err}
+    rm -f "$CONFIG_DIR/logs/fetch-${graph}".{out,err}
+
+    echo "Removed graph '$graph'"
+}
+
 generate_plists() {
     local graph="$1"
     local config_file="$CONFIG_DIR/graphs/${graph}.conf"
@@ -613,7 +657,8 @@ case "${1:-}" in
         add_graph "${2:-}"
         ;;
     remove-graph)
-        echo "Not implemented yet"
+        [[ -z "${2:-}" ]] && { echo "Usage: logseq-sync remove-graph <name> [--force]"; exit 1; }
+        remove_graph "$2" "${3:-}"
         ;;
     status)
         status

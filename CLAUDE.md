@@ -22,6 +22,7 @@ make lint             # Run shellcheck on all scripts
 
 # Operations (after install)
 logseq-sync add-graph <path>   # Register a new graph
+logseq-sync remove-graph <name> # Remove a graph
 logseq-sync status             # Show status of all graphs
 logseq-sync sync [graph]       # Manual sync
 logseq-sync start [graph]      # Start background services
@@ -78,6 +79,7 @@ Test files:
 - `tests/config.bats` - Configuration read/write operations
 - `tests/notify.bats` - Logging utilities
 - `tests/integration.bats` - Full sync cycle
+- `tests/remove-graph.bats` - Graph removal operations
 
 ## Key Implementation Details
 

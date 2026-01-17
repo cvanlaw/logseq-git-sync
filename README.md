@@ -46,18 +46,20 @@ The `add-graph` command will:
 ## Usage
 
 ```bash
-logseq-sync status             # Show status of all graphs
-logseq-sync sync [graph]       # Manual sync (all or specific graph)
-logseq-sync start [graph]      # Start background services
-logseq-sync stop [graph]       # Stop background services
-logseq-sync stop-all           # Stop all services
-logseq-sync logs [graph]       # View logs
-logseq-sync conflicts          # List unresolved conflicts
-logseq-sync install-services   # Regenerate launchd plists
-logseq-sync config show        # Show configuration
-logseq-sync config get KEY     # Get config value
-logseq-sync config set KEY VAL # Set config value
-logseq-sync config edit        # Edit config in $EDITOR
+logseq-sync status                      # Show status of all graphs
+logseq-sync sync [graph]                # Manual sync (all or specific graph)
+logseq-sync start [graph]               # Start background services
+logseq-sync stop [graph]                # Stop background services
+logseq-sync stop-all                    # Stop all services
+logseq-sync logs [graph]                # View logs
+logseq-sync conflicts                   # List unresolved conflicts
+logseq-sync remove-graph <name>         # Remove a graph (with confirmation)
+logseq-sync remove-graph <name> --force # Remove without confirmation
+logseq-sync install-services            # Regenerate launchd plists
+logseq-sync config show                 # Show configuration
+logseq-sync config get KEY              # Get config value
+logseq-sync config set KEY VAL          # Set config value
+logseq-sync config edit                 # Edit config in $EDITOR
 ```
 
 Use `--graph NAME` with config commands to target a specific graph's config.
