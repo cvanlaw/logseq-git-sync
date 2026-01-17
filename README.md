@@ -54,7 +54,13 @@ logseq-sync stop-all           # Stop all services
 logseq-sync logs [graph]       # View logs
 logseq-sync conflicts          # List unresolved conflicts
 logseq-sync install-services   # Regenerate launchd plists
+logseq-sync config show        # Show configuration
+logseq-sync config get KEY     # Get config value
+logseq-sync config set KEY VAL # Set config value
+logseq-sync config edit        # Edit config in $EDITOR
 ```
+
+Use `--graph NAME` with config commands to target a specific graph's config.
 
 ## How It Works
 

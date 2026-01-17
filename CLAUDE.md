@@ -28,6 +28,9 @@ logseq-sync start [graph]      # Start background services
 logseq-sync stop [graph]       # Stop services
 logseq-sync logs [graph]       # View logs
 logseq-sync conflicts          # List unresolved conflicts
+logseq-sync config show        # Show config (add --graph NAME for per-graph)
+logseq-sync config get KEY     # Get config value
+logseq-sync config set KEY VAL # Set config value
 ```
 
 ## Architecture
@@ -72,6 +75,7 @@ Tests use bats-core and create temporary git repos for isolation. Set `TEST_MODE
 Test files:
 - `tests/commit.bats` - Commit/push operations
 - `tests/merge.bats` - Fetch/merge with conflict handling
+- `tests/config.bats` - Configuration read/write operations
 - `tests/notify.bats` - Logging utilities
 - `tests/integration.bats` - Full sync cycle
 
